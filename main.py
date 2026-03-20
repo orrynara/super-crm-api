@@ -12,10 +12,14 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — 개발: 모든 origin 허용 / 운영: 프론트 도메인만
+# CORS — Netlify 프론트 + 로컬 개발 허용
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://super-crm-app.netlify.app",
+        "http://localhost:3200",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
