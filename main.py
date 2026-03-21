@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from routers import customers, activities, codes, import_excel
+from routers import customers, activities, codes, import_excel, admin_mgmt
 
 app = FastAPI(
     title="SUPER CRM API",
@@ -29,6 +29,7 @@ app.include_router(customers.router)
 app.include_router(activities.router)
 app.include_router(codes.router)
 app.include_router(import_excel.router)
+app.include_router(admin_mgmt.router)
 
 
 @app.get("/")
