@@ -121,6 +121,86 @@ def renewal_alerts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/policy-anniversary")
+def policy_anniversary():
+    """상령일 명단 — 30일 이내 계약 상령일 도래"""
+    try:
+        today = date.today()
+        result = supabase.table("contracts") \
+            .select("*, customers(id, name, phone, category)") \
+            .eq("status", "active") \
+            .not_.is_("contract_date", "null") \
+            .execute()
+
+        contracts = result.data or []
+        upcoming = []
+        for c in contracts:
+            cd = c.get("contract_date")
+            if not cd:
+                continue
+            try:
+                contract_d = date.fromisoformat(cd)
+                this_year_anniv = contract_d.replace(year=today.year)
+                if this_year_anniv < today:
+                    this_year_anniv = this_year_anniv.replace(year=today.year + 1)
+                diff = (this_year_anniv - today).days
+                if 0 <= diff <= 30:
+                    c["days_left"] = diff
+                    c["anniversary_date"] = str(this_year_anniv)
+                    c["contract_years"] = this_year_anniv.year - contract_d.year
+                    upcoming.append(c)
+            except Exception:
+                continue
+
+        upcoming.sort(key=lambda x: x.get("days_left", 999))
+        return ApiResponse(success=True, data=upcoming, message=f"{len(upcoming)}건")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/age-groups")
+def age_groups():
+    """연령대별 고객 명단"""
+    try:
+        today = date.today()
+        result = supabase.table("customers") \
+            .select("id, name, phone, birth_date, category") \
+            .eq("status", "active") \
+            .execute()
+
+        customers = result.data or []
+        groups = {
+            "10대": [], "20대": [], "30대": [], "40대": [],
+            "50대": [], "60대": [], "70대 이상": [], "미상": [],
+        }
+
+        for c in customers:
+            bd = c.get("birth_date")
+            if not bd:
+                groups["미상"].append(c)
+                continue
+            try:
+                age = today.year - int(bd[:4])
+                if age < 20:        groups["10대"].append(c)
+                elif age < 30:      groups["20대"].append(c)
+                elif age < 40:      groups["30대"].append(c)
+                elif age < 50:      groups["40대"].append(c)
+                elif age < 60:      groups["50대"].append(c)
+                elif age < 70:      groups["60대"].append(c)
+                else:               groups["70대 이상"].append(c)
+            except Exception:
+                groups["미상"].append(c)
+
+        data = [
+            {"group": k, "count": len(v), "customers": v}
+            for k, v in groups.items() if v
+        ]
+        total = sum(len(v) for v in groups.values())
+        return ApiResponse(success=True, data=data, message=f"전체 {total}명")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/summary")
 def alert_summary():
     """대시보드용 알림 요약"""
