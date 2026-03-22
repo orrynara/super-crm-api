@@ -68,10 +68,10 @@ async def preview_excel(file: UploadFile = File(...)):
     try:
         contents = await file.read()
 
-        # 헤더 행 자동 탐색 (0~4행 시도)
+        # 헤더 행 자동 탐색 (0~19행 시도)
         df = None
         col_map = {}
-        for header_row in range(5):
+        for header_row in range(20):
             try:
                 _df = pd.read_excel(io.BytesIO(contents), header=header_row, engine="openpyxl")
                 _df.columns = [str(c).strip() for c in _df.columns]
@@ -106,11 +106,15 @@ async def preview_excel(file: UploadFile = File(...)):
                 continue
 
         if df is None or "name" not in col_map:
-            # 실제 컬럼명을 에러에 포함해서 디버깅 가능하게
+            # 실제 셀 값을 행별로 스캔해서 디버깅 가능하게
             try:
-                _df_raw = pd.read_excel(io.BytesIO(contents), header=0, engine="openpyxl")
-                actual_cols = [str(c).strip() for c in _df_raw.columns.tolist()[:15]]
-                raise HTTPException(status_code=422, detail=f"'이름' 컬럼을 찾을 수 없습니다. 발견된 컬럼: {actual_cols}")
+                _df_raw = pd.read_excel(io.BytesIO(contents), header=None, engine="openpyxl")
+                row_samples = {}
+                for i in range(min(25, len(_df_raw))):
+                    vals = [str(v).strip() for v in _df_raw.iloc[i].tolist() if str(v).strip() not in ["nan", "", "None"]]
+                    if vals:
+                        row_samples[f"row{i}"] = vals[:10]
+                raise HTTPException(status_code=422, detail=f"'이름' 컬럼을 찾을 수 없습니다. 행별 셀 값: {row_samples}")
             except HTTPException:
                 raise
             except Exception:
@@ -178,7 +182,7 @@ async def confirm_import(file: UploadFile = File(...)):
 
         df = None
         col_map = {}
-        for header_row in range(5):
+        for header_row in range(20):
             try:
                 _df = pd.read_excel(io.BytesIO(contents), header=header_row, engine="openpyxl")
                 _df.columns = [str(c).strip() for c in _df.columns]
