@@ -67,38 +67,54 @@ async def preview_excel(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls, .xlsm)만 업로드 가능합니다.")
     try:
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents), header=0, engine="openpyxl")
 
-        # 컬럼명 정규화 (공백 제거)
-        df.columns = [str(c).strip() for c in df.columns]
-
-        # ── 컬럼 자동 감지 ──────────────────────────────
+        # 헤더 행 자동 탐색 (0~4행 시도)
+        df = None
         col_map = {}
-        for col in df.columns:
-            c = col.strip()
-            if c in ["이름", "성명", "고객이름", "name"]:
-                col_map["name"] = col
-            elif c in ["휴대폰", "전화", "연락처", "핸드폰", "휴대전화", "phone"]:
-                col_map["phone"] = col
-            elif c in ["고객등급", "등급", "고객구분", "category"]:
-                col_map["category"] = col
-            elif c in ["주민번호앞", "주민앞", "생년월일", "birth"]:
-                col_map["birth"] = col
-            elif c in ["직업", "job"]:
-                col_map["job"] = col
-            elif c in ["성별", "gender"]:
-                col_map["gender"] = col
-            elif c in ["소개자", "introducer"]:
-                col_map["introducer"] = col
-            elif c in ["그룹분류", "그룹", "group"]:
-                col_map["group"] = col
-            elif c in ["주소", "집주소", "address"]:
-                col_map["address"] = col
-            elif c in ["특이사항", "특이사항1", "메모", "memo"]:
-                col_map["memo"] = col
+        for header_row in range(5):
+            try:
+                _df = pd.read_excel(io.BytesIO(contents), header=header_row, engine="openpyxl")
+                _df.columns = [str(c).strip() for c in _df.columns]
+                _map = {}
+                for col in _df.columns:
+                    c = col.strip()
+                    if c in ["이름", "성명", "고객이름", "name", "고객명"]:
+                        _map["name"] = col
+                    elif c in ["휴대폰", "전화", "연락처", "핸드폰", "휴대전화", "phone", "전화번호", "연락처(휴대)"]:
+                        _map["phone"] = col
+                    elif c in ["고객등급", "등급", "고객구분", "category", "구분"]:
+                        _map["category"] = col
+                    elif c in ["주민번호앞", "주민앞", "생년월일", "birth", "주민번호", "생년월일(주민앞)"]:
+                        _map["birth"] = col
+                    elif c in ["직업", "job"]:
+                        _map["job"] = col
+                    elif c in ["성별", "gender"]:
+                        _map["gender"] = col
+                    elif c in ["소개자", "introducer", "소개"]:
+                        _map["introducer"] = col
+                    elif c in ["그룹분류", "그룹", "group"]:
+                        _map["group"] = col
+                    elif c in ["주소", "집주소", "address", "거주지"]:
+                        _map["address"] = col
+                    elif c in ["특이사항", "특이사항1", "메모", "memo", "비고"]:
+                        _map["memo"] = col
+                if "name" in _map:
+                    df = _df
+                    col_map = _map
+                    break
+            except Exception:
+                continue
 
-        if "name" not in col_map:
-            raise HTTPException(status_code=422, detail="'이름' 또는 '성명' 컬럼을 찾을 수 없습니다. 첫 행이 헤더인지 확인해주세요.")
+        if df is None or "name" not in col_map:
+            # 실제 컬럼명을 에러에 포함해서 디버깅 가능하게
+            try:
+                _df_raw = pd.read_excel(io.BytesIO(contents), header=0, engine="openpyxl")
+                actual_cols = [str(c).strip() for c in _df_raw.columns.tolist()[:15]]
+                raise HTTPException(status_code=422, detail=f"'이름' 컬럼을 찾을 수 없습니다. 발견된 컬럼: {actual_cols}")
+            except HTTPException:
+                raise
+            except Exception:
+                raise HTTPException(status_code=422, detail="'이름' 또는 '성명' 컬럼을 찾을 수 없습니다.")
 
         # ── 데이터 파싱 ─────────────────────────────────
         records = []
@@ -159,24 +175,34 @@ async def confirm_import(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Excel 파일만 업로드 가능합니다.")
     try:
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents), header=0, engine="openpyxl")
-        df.columns = [str(c).strip() for c in df.columns]
 
+        df = None
         col_map = {}
-        for col in df.columns:
-            c = col.strip()
-            if c in ["이름", "성명", "고객이름"]:           col_map["name"] = col
-            elif c in ["휴대폰", "전화", "연락처", "핸드폰"]: col_map["phone"] = col
-            elif c in ["고객등급", "등급", "고객구분"]:       col_map["category"] = col
-            elif c in ["주민번호앞", "주민앞", "생년월일"]:   col_map["birth"] = col
-            elif c in ["직업"]:                               col_map["job"] = col
-            elif c in ["성별"]:                               col_map["gender"] = col
-            elif c in ["소개자"]:                             col_map["introducer"] = col
-            elif c in ["그룹분류", "그룹"]:                   col_map["group"] = col
-            elif c in ["주소", "집주소"]:                     col_map["address"] = col
-            elif c in ["특이사항", "특이사항1", "메모"]:       col_map["memo"] = col
+        for header_row in range(5):
+            try:
+                _df = pd.read_excel(io.BytesIO(contents), header=header_row, engine="openpyxl")
+                _df.columns = [str(c).strip() for c in _df.columns]
+                _map = {}
+                for col in _df.columns:
+                    c = col.strip()
+                    if c in ["이름", "성명", "고객이름", "name", "고객명"]:         _map["name"] = col
+                    elif c in ["휴대폰", "전화", "연락처", "핸드폰", "휴대전화", "phone", "전화번호", "연락처(휴대)"]: _map["phone"] = col
+                    elif c in ["고객등급", "등급", "고객구분", "category", "구분"]: _map["category"] = col
+                    elif c in ["주민번호앞", "주민앞", "생년월일", "birth", "주민번호", "생년월일(주민앞)"]: _map["birth"] = col
+                    elif c in ["직업", "job"]:                                       _map["job"] = col
+                    elif c in ["성별", "gender"]:                                    _map["gender"] = col
+                    elif c in ["소개자", "introducer", "소개"]:                      _map["introducer"] = col
+                    elif c in ["그룹분류", "그룹", "group"]:                         _map["group"] = col
+                    elif c in ["주소", "집주소", "address", "거주지"]:               _map["address"] = col
+                    elif c in ["특이사항", "특이사항1", "메모", "memo", "비고"]:     _map["memo"] = col
+                if "name" in _map:
+                    df = _df
+                    col_map = _map
+                    break
+            except Exception:
+                continue
 
-        if "name" not in col_map:
+        if df is None or "name" not in col_map:
             raise HTTPException(status_code=422, detail="'이름' 컬럼을 찾을 수 없습니다.")
 
         records = []
