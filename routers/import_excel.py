@@ -63,11 +63,11 @@ def normalize_phone(phone) -> Optional[str]:
 @router.post("/excel/preview")
 async def preview_excel(file: UploadFile = File(...)):
     """엑셀 파일 업로드 → 파싱 미리보기 (저장 안함)"""
-    if not file.filename.endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls)만 업로드 가능합니다.")
+    if not file.filename.endswith((".xlsx", ".xls", ".xlsm")):
+        raise HTTPException(status_code=400, detail="Excel 파일(.xlsx, .xls, .xlsm)만 업로드 가능합니다.")
     try:
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents), header=0)
+        df = pd.read_excel(io.BytesIO(contents), header=0, engine="openpyxl")
 
         # 컬럼명 정규화 (공백 제거)
         df.columns = [str(c).strip() for c in df.columns]
@@ -155,11 +155,11 @@ async def preview_excel(file: UploadFile = File(...)):
 @router.post("/excel/confirm")
 async def confirm_import(file: UploadFile = File(...)):
     """엑셀 파일 → Supabase 일괄 저장"""
-    if not file.filename.endswith((".xlsx", ".xls")):
+    if not file.filename.endswith((".xlsx", ".xls", ".xlsm")):
         raise HTTPException(status_code=400, detail="Excel 파일만 업로드 가능합니다.")
     try:
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents), header=0)
+        df = pd.read_excel(io.BytesIO(contents), header=0, engine="openpyxl")
         df.columns = [str(c).strip() for c in df.columns]
 
         col_map = {}
