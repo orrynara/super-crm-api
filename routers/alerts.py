@@ -1,0 +1,164 @@
+from fastapi import APIRouter, HTTPException
+from datetime import date, timedelta
+from services.supabase_client import supabase
+from models.schemas import ApiResponse
+
+router = APIRouter(prefix="/api/v1/alerts", tags=["alerts"])
+
+
+@router.get("/birthday")
+def birthday_alerts():
+    """이번 달 + 다음 달 생일 고객"""
+    try:
+        today = date.today()
+        result = supabase.table("customers") \
+            .select("id, name, phone, birth_date, category") \
+            .eq("status", "active") \
+            .not_.is_("birth_date", "null") \
+            .execute()
+
+        customers = result.data or []
+        this_month, next_month = [], []
+        for c in customers:
+            bd = c.get("birth_date")
+            if not bd:
+                continue
+            try:
+                m = int(bd[5:7])
+                d = int(bd[8:10])
+                if m == today.month:
+                    c["birth_day"] = d
+                    this_month.append(c)
+                elif m == (today.month % 12) + 1:
+                    c["birth_day"] = d
+                    next_month.append(c)
+            except Exception:
+                continue
+
+        this_month.sort(key=lambda x: x.get("birth_day", 0))
+        next_month.sort(key=lambda x: x.get("birth_day", 0))
+
+        return ApiResponse(success=True, data={
+            "this_month": this_month,
+            "next_month": next_month,
+            "total": len(this_month) + len(next_month)
+        }, message=f"이번 달 {len(this_month)}명, 다음 달 {len(next_month)}명")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/anniversary")
+def anniversary_alerts():
+    """첫만남 기념일 D-30 이내 고객"""
+    try:
+        today = date.today()
+        result = supabase.table("customers") \
+            .select("id, name, phone, first_meet_date, category") \
+            .eq("status", "active") \
+            .not_.is_("first_meet_date", "null") \
+            .execute()
+
+        customers = result.data or []
+        upcoming = []
+        for c in customers:
+            fmd = c.get("first_meet_date")
+            if not fmd:
+                continue
+            try:
+                m = int(fmd[5:7])
+                d = int(fmd[8:10])
+                this_year_date = date(today.year, m, d)
+                diff = (this_year_date - today).days
+                if 0 <= diff <= 30:
+                    c["days_left"] = diff
+                    c["years"] = today.year - int(fmd[:4])
+                    upcoming.append(c)
+            except Exception:
+                continue
+
+        upcoming.sort(key=lambda x: x.get("days_left", 99))
+        return ApiResponse(success=True, data=upcoming, message=f"{len(upcoming)}명")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/renewal")
+def renewal_alerts():
+    """계약 만기/갱신 D-90 이내"""
+    try:
+        today = date.today()
+        cutoff = today + timedelta(days=90)
+        result = supabase.table("contracts") \
+            .select("*, customers(id, name, phone)") \
+            .eq("status", "active") \
+            .not_.is_("contract_date", "null") \
+            .execute()
+
+        contracts = result.data or []
+        # 납입기간 기반 만기 계산은 복잡하므로 contract_date+1년 이내 단순 체크
+        upcoming = []
+        for c in contracts:
+            cd = c.get("contract_date")
+            if not cd:
+                continue
+            try:
+                contract_d = date.fromisoformat(cd)
+                # 연간 갱신 기준: 계약일 +1년이 오늘~90일 이내
+                next_renewal = contract_d.replace(year=today.year)
+                if next_renewal < today:
+                    next_renewal = next_renewal.replace(year=today.year + 1)
+                diff = (next_renewal - today).days
+                if 0 <= diff <= 90:
+                    c["days_left"] = diff
+                    c["renewal_date"] = str(next_renewal)
+                    upcoming.append(c)
+            except Exception:
+                continue
+
+        upcoming.sort(key=lambda x: x.get("days_left", 999))
+        return ApiResponse(success=True, data=upcoming, message=f"{len(upcoming)}건")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/summary")
+def alert_summary():
+    """대시보드용 알림 요약"""
+    try:
+        today = date.today()
+
+        # 이번 달 생일
+        customers = supabase.table("customers") \
+            .select("birth_date") \
+            .eq("status", "active") \
+            .not_.is_("birth_date", "null") \
+            .execute().data or []
+        birthday_count = sum(
+            1 for c in customers
+            if c.get("birth_date") and int(c["birth_date"][5:7]) == today.month
+        )
+
+        # 만기 90일 이내
+        contracts = supabase.table("contracts") \
+            .select("contract_date") \
+            .eq("status", "active") \
+            .not_.is_("contract_date", "null") \
+            .execute().data or []
+        renewal_count = 0
+        for c in contracts:
+            try:
+                cd = date.fromisoformat(c["contract_date"])
+                nr = cd.replace(year=today.year)
+                if nr < today:
+                    nr = nr.replace(year=today.year + 1)
+                if 0 <= (nr - today).days <= 90:
+                    renewal_count += 1
+            except Exception:
+                continue
+
+        return ApiResponse(success=True, data={
+            "birthday_this_month": birthday_count,
+            "renewal_90days": renewal_count,
+        }, message="알림 요약")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
