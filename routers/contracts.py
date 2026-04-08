@@ -8,8 +8,11 @@ from models.schemas import ApiResponse
 router = APIRouter(prefix="/api/v1/contracts", tags=["contracts"])
 
 
+# ─── Contract v2 — 30+ 필드 (내고객다보여 25 PDF p12 정답지) ─────────
 class ContractCreate(BaseModel):
     customer_id: str
+
+    # 기존 (호환)
     insurer: Optional[str] = None
     product_name: Optional[str] = None
     contract_date: Optional[date] = None
@@ -20,8 +23,56 @@ class ContractCreate(BaseModel):
     status: Optional[str] = "active"
     memo: Optional[str] = None
 
+    # 인적 정보 (v2)
+    family_head: Optional[str] = None
+    contractor_name: Optional[str] = None
+    contractor_ssn: Optional[str] = None
+    contractor_phone: Optional[str] = None
+    insured_name: Optional[str] = None
+    insured_ssn: Optional[str] = None
+    insured_phone: Optional[str] = None
+    beneficiary_death: Optional[str] = None
+    beneficiary_disability: Optional[str] = None
+    relation_to_main: Optional[str] = None
+
+    # 보험 (v2)
+    insurance_type: Optional[str] = None
+    agent_name: Optional[str] = None
+    agent_code: Optional[str] = None
+    actual_premium: Optional[int] = None
+    recruiter: Optional[str] = None
+    sales_company: Optional[str] = None
+
+    # 주계약 (v2)
+    main_contract: Optional[str] = None
+    insurance_amount: Optional[int] = None
+    main_premium: Optional[int] = None
+    insurance_period_year: Optional[int] = None
+    insurance_period_unit: Optional[str] = None
+    insurance_expiry: Optional[date] = None
+    payment_period_year: Optional[int] = None
+    payment_period_unit: Optional[str] = None
+    payment_expiry: Optional[date] = None
+    payment_status: Optional[str] = None
+    contract_status: Optional[str] = None
+    annuity_start: Optional[str] = None
+    annuity_type: Optional[str] = None
+
+    # 결제 (v2)
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_holder: Optional[str] = None
+    withdraw_day: Optional[int] = None
+
+    # 메모 (v2)
+    contract_summary: Optional[str] = None
+    contract_memo: Optional[str] = None
+    contract_source: Optional[str] = None
+    registered_date: Optional[date] = None
+
 
 class ContractUpdate(BaseModel):
+    # 기존
     insurer: Optional[str] = None
     product_name: Optional[str] = None
     contract_date: Optional[date] = None
@@ -31,6 +82,53 @@ class ContractUpdate(BaseModel):
     policy_number: Optional[str] = None
     status: Optional[str] = None
     memo: Optional[str] = None
+
+    # v2 — 인적
+    family_head: Optional[str] = None
+    contractor_name: Optional[str] = None
+    contractor_ssn: Optional[str] = None
+    contractor_phone: Optional[str] = None
+    insured_name: Optional[str] = None
+    insured_ssn: Optional[str] = None
+    insured_phone: Optional[str] = None
+    beneficiary_death: Optional[str] = None
+    beneficiary_disability: Optional[str] = None
+    relation_to_main: Optional[str] = None
+
+    # v2 — 보험
+    insurance_type: Optional[str] = None
+    agent_name: Optional[str] = None
+    agent_code: Optional[str] = None
+    actual_premium: Optional[int] = None
+    recruiter: Optional[str] = None
+    sales_company: Optional[str] = None
+
+    # v2 — 주계약
+    main_contract: Optional[str] = None
+    insurance_amount: Optional[int] = None
+    main_premium: Optional[int] = None
+    insurance_period_year: Optional[int] = None
+    insurance_period_unit: Optional[str] = None
+    insurance_expiry: Optional[date] = None
+    payment_period_year: Optional[int] = None
+    payment_period_unit: Optional[str] = None
+    payment_expiry: Optional[date] = None
+    payment_status: Optional[str] = None
+    contract_status: Optional[str] = None
+    annuity_start: Optional[str] = None
+    annuity_type: Optional[str] = None
+
+    # v2 — 결제
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_holder: Optional[str] = None
+    withdraw_day: Optional[int] = None
+
+    # v2 — 메모
+    contract_summary: Optional[str] = None
+    contract_memo: Optional[str] = None
+    contract_source: Optional[str] = None
+    registered_date: Optional[date] = None
 
 
 @router.get("/customer/{customer_id}")
@@ -47,12 +145,26 @@ def list_contracts(customer_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{contract_id}")
+def get_contract(contract_id: str):
+    """계약 단일 조회"""
+    try:
+        result = supabase.table("contracts").select("*").eq("id", contract_id).single().execute()
+        if not result.data:
+            raise HTTPException(status_code=404, detail="계약을 찾을 수 없습니다.")
+        return ApiResponse(success=True, data=result.data)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("")
 def create_contract(body: ContractCreate):
-    """계약 등록"""
+    """계약 등록 (v2 — 30+ 필드)"""
     try:
-        payload = {k: str(v) if isinstance(v, date) else v
-                   for k, v in body.dict().items() if v is not None}
+        payload = {k: (v.isoformat() if isinstance(v, date) else v)
+                   for k, v in body.model_dump().items() if v is not None}
         result = supabase.table("contracts").insert(payload).execute()
         return ApiResponse(success=True, data=result.data[0] if result.data else {}, message="계약 등록 완료")
     except Exception as e:
@@ -61,10 +173,10 @@ def create_contract(body: ContractCreate):
 
 @router.patch("/{contract_id}")
 def update_contract(contract_id: str, body: ContractUpdate):
-    """계약 수정"""
+    """계약 수정 (v2)"""
     try:
-        payload = {k: str(v) if isinstance(v, date) else v
-                   for k, v in body.dict().items() if v is not None}
+        payload = {k: (v.isoformat() if isinstance(v, date) else v)
+                   for k, v in body.model_dump().items() if v is not None}
         if not payload:
             raise HTTPException(status_code=400, detail="수정할 항목이 없습니다.")
         result = supabase.table("contracts").update(payload).eq("id", contract_id).execute()
