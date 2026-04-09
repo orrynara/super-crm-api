@@ -291,6 +291,35 @@ class CodeResponse(BaseModel):
     is_active: bool
 
 
+# ─── Cabinet Files (캐비닛 시스템 v3) ─────────────────────
+class CabinetFileBase(BaseModel):
+    category_key: str                       # 12 기본 키 또는 'custom'
+    category_label: Optional[str] = None
+    memo: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class CabinetFileUpdate(BaseModel):
+    category_key: Optional[str] = None
+    category_label: Optional[str] = None
+    memo: Optional[str] = None
+    tags: Optional[List[str]] = None
+
+
+class CabinetFileResponse(CabinetFileBase):
+    id: str
+    customer_id: str
+    filename: str
+    original_name: Optional[str] = None
+    storage_path: str
+    storage_bucket: Optional[str] = None
+    size_bytes: Optional[int] = 0
+    mime_type: Optional[str] = None
+    url: Optional[str] = None  # 동적 생성 (public URL)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
 # ─── API 공통 응답 형식 ─────────────────────
 class ApiResponse(BaseModel):
     success: bool
