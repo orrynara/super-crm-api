@@ -17,6 +17,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://super-crm-app.netlify.app",
+        "https://crm.haru.tips",
         "http://localhost:3200",
         "http://localhost:5173",
     ],
