@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request
 from typing import Optional
 import pandas as pd
 import io
@@ -274,11 +274,22 @@ async def preview_excel(file: UploadFile = File(...)):
 
 
 @router.post("/excel/confirm")
-async def confirm_import(file: UploadFile = File(...)):
+async def confirm_import(request: Request, file: UploadFile = File(...)):
     """엑셀 파일 → Supabase 일괄 저장"""
     if not file.filename.endswith((".xlsx", ".xls", ".xlsm")):
         raise HTTPException(status_code=400, detail="Excel 파일만 업로드 가능합니다.")
     try:
+        # JWT 토큰에서 agent_id 추출
+        agent_id = None
+        token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        if token:
+            try:
+                user_resp = supabase.auth.get_user(token)
+                if user_resp.user:
+                    agent_id = str(user_resp.user.id)
+            except Exception:
+                pass
+
         contents = await file.read()
         df, col_map, _ = find_customer_sheet(contents)
 
@@ -289,8 +300,11 @@ async def confirm_import(file: UploadFile = File(...)):
             if rec is None:
                 skipped += 1
             else:
-                # None 값 제거 후 저장
-                records.append({k: v for k, v in rec.items() if v is not None})
+                # None 값 제거 후 저장, agent_id 자동 할당
+                clean = {k: v for k, v in rec.items() if v is not None}
+                if agent_id:
+                    clean["agent_id"] = agent_id
+                records.append(clean)
 
         if not records:
             raise HTTPException(status_code=422, detail="임포트할 유효한 데이터가 없습니다.")

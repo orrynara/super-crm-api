@@ -82,38 +82,87 @@ def anniversary_alerts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _parse_period_years(period_str) -> Optional[int]:
+    """납입기간/보장기간 문자열 → 연수 (예: "10년" → 10, "종신" → 100)"""
+    if not period_str:
+        return None
+    import re
+    s = str(period_str).strip()
+    if "종신" in s or "평생" in s:
+        return 100
+    m = re.search(r"(\d+)\s*년", s)
+    if m:
+        return int(m.group(1))
+    return None
+
+
 @router.get("/renewal")
 def renewal_alerts():
-    """계약 만기/갱신 D-90 이내"""
+    """계약 만기/갱신 D-90 이내 — 납입기간/만기일 실제 반영"""
     try:
         today = date.today()
-        cutoff = today + timedelta(days=90)
         result = supabase.table("contracts") \
             .select("*, customers(id, name, phone)") \
             .eq("status", "active") \
-            .not_.is_("contract_date", "null") \
             .execute()
 
         contracts = result.data or []
-        # 납입기간 기반 만기 계산은 복잡하므로 contract_date+1년 이내 단순 체크
         upcoming = []
         for c in contracts:
-            cd = c.get("contract_date")
-            if not cd:
+            expiry_date = None
+
+            # 1순위: insurance_expiry (보험 만기일 직접 입력된 경우)
+            if c.get("insurance_expiry"):
+                try:
+                    expiry_date = date.fromisoformat(c["insurance_expiry"])
+                except Exception:
+                    pass
+
+            # 2순위: payment_expiry (납입 만기일 직접 입력된 경우)
+            if not expiry_date and c.get("payment_expiry"):
+                try:
+                    expiry_date = date.fromisoformat(c["payment_expiry"])
+                except Exception:
+                    pass
+
+            # 3순위: contract_date + payment_period_year (납입기간 연수 계산)
+            if not expiry_date and c.get("contract_date") and c.get("payment_period_year"):
+                try:
+                    cd = date.fromisoformat(c["contract_date"])
+                    years = int(c["payment_period_year"])
+                    expiry_date = cd.replace(year=cd.year + years)
+                except Exception:
+                    pass
+
+            # 4순위: contract_date + payment_period 문자열 파싱 (예: "10년")
+            if not expiry_date and c.get("contract_date") and c.get("payment_period"):
+                years = _parse_period_years(c["payment_period"])
+                if years:
+                    try:
+                        cd = date.fromisoformat(c["contract_date"])
+                        expiry_date = cd.replace(year=cd.year + years)
+                    except Exception:
+                        pass
+
+            # 5순위 폴백: contract_date 기준 연간 갱신 (기존 로직)
+            if not expiry_date and c.get("contract_date"):
+                try:
+                    cd = date.fromisoformat(c["contract_date"])
+                    next_renewal = cd.replace(year=today.year)
+                    if next_renewal < today:
+                        next_renewal = next_renewal.replace(year=today.year + 1)
+                    expiry_date = next_renewal
+                except Exception:
+                    continue
+
+            if not expiry_date:
                 continue
-            try:
-                contract_d = date.fromisoformat(cd)
-                # 연간 갱신 기준: 계약일 +1년이 오늘~90일 이내
-                next_renewal = contract_d.replace(year=today.year)
-                if next_renewal < today:
-                    next_renewal = next_renewal.replace(year=today.year + 1)
-                diff = (next_renewal - today).days
-                if 0 <= diff <= 90:
-                    c["days_left"] = diff
-                    c["renewal_date"] = str(next_renewal)
-                    upcoming.append(c)
-            except Exception:
-                continue
+
+            diff = (expiry_date - today).days
+            if 0 <= diff <= 90:
+                c["days_left"] = diff
+                c["renewal_date"] = str(expiry_date)
+                upcoming.append(c)
 
         upcoming.sort(key=lambda x: x.get("days_left", 999))
         return ApiResponse(success=True, data=upcoming, message=f"{len(upcoming)}건")

@@ -3,6 +3,7 @@ from typing import Optional
 from datetime import date
 from models.schemas import CustomerCreate, CustomerUpdate, ApiResponse
 from services.supabase_client import supabase
+from services.audit import log_audit
 
 router = APIRouter(prefix="/api/v1/customers", tags=["customers"])
 
@@ -36,6 +37,43 @@ def get_customers(
         offset = (page - 1) * size
         result = query.order("created_at", desc=True).range(offset, offset + size - 1).execute()
         return ApiResponse(success=True, data=result.data, message=f"{len(result.data)}건 조회")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/search-by-contract")
+def search_by_contract_preview(
+    insurer: Optional[str] = Query(None),
+    product_name: Optional[str] = Query(None),
+    policy_number: Optional[str] = Query(None),
+    contractor_name: Optional[str] = Query(None),
+    insured_name: Optional[str] = Query(None),
+):
+    """계약 정보로 고객 검색 — /{customer_id} 보다 먼저 정의해야 함"""
+    try:
+        if not any([insurer, product_name, policy_number, contractor_name, insured_name]):
+            raise HTTPException(status_code=400, detail="검색 조건을 하나 이상 입력해주세요.")
+
+        q = supabase.table("contracts").select("*, customers(*)")
+        if insurer:          q = q.ilike("insurer", f"%{insurer}%")
+        if product_name:     q = q.ilike("product_name", f"%{product_name}%")
+        if policy_number:    q = q.ilike("policy_number", f"%{policy_number}%")
+        if contractor_name:  q = q.ilike("contractor_name", f"%{contractor_name}%")
+        if insured_name:     q = q.ilike("insured_name", f"%{insured_name}%")
+
+        result = q.execute()
+        seen, customers = set(), []
+        for c in result.data or []:
+            cust = c.get("customers")
+            if cust and cust.get("id") not in seen:
+                seen.add(cust["id"])
+                cust["matched_contract"] = {k: c.get(k) for k in
+                    ("insurer", "product_name", "policy_number", "contractor_name", "insured_name", "contract_date")}
+                customers.append(cust)
+
+        return ApiResponse(success=True, data=customers, message=f"{len(customers)}명")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -125,8 +163,15 @@ def update_customer(customer_id: str, body: CustomerUpdate):
         if not data:
             raise HTTPException(status_code=400, detail="수정할 항목이 없습니다.")
 
+        # 감사 로그: 수정 전 데이터 조회
+        before = supabase.table("customers").select("*").eq("id", customer_id).maybe_single().execute()
+        before_data = before.data if before else None
+
         result = supabase.table("customers").update(data).eq("id", customer_id).execute()
-        return ApiResponse(success=True, data=result.data[0] if result.data else {}, message="수정되었습니다.")
+        after_data = result.data[0] if result.data else {}
+
+        log_audit("customers", customer_id, "UPDATE", before_data=before_data, after_data=after_data)
+        return ApiResponse(success=True, data=after_data, message="수정되었습니다.")
     except HTTPException:
         raise
     except Exception as e:
@@ -137,7 +182,12 @@ def update_customer(customer_id: str, body: CustomerUpdate):
 def delete_customer(customer_id: str):
     """고객 삭제 (CASCADE로 relations, contracts, medical_notes 모두 삭제)"""
     try:
+        # 감사 로그: 삭제 전 데이터 조회
+        before = supabase.table("customers").select("*").eq("id", customer_id).maybe_single().execute()
+        before_data = before.data if before else None
+
         supabase.table("customers").delete().eq("id", customer_id).execute()
+        log_audit("customers", customer_id, "DELETE", before_data=before_data)
         return ApiResponse(success=True, message="삭제되었습니다.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
